@@ -4,12 +4,15 @@ import XCTest
 final class RelayCertificateIssuerTests: XCTestCase {
     func testFlagsKnownInspectingFirewalls() {
         XCTAssertTrue(RelayCertificateIssuer.looksLikeInspectingFirewall("FG121GTK24002248 Fortinet"))
+        XCTAssertTrue(RelayCertificateIssuer.looksLikeInspectingFirewall("FG121GTK24002248"))
+        XCTAssertTrue(RelayCertificateIssuer.looksLikeInspectingFirewall("FGT60FTK2209XXXX"))
         XCTAssertTrue(RelayCertificateIssuer.looksLikeInspectingFirewall("Zscaler Intermediate Root CA"))
     }
 
     func testRealPublicAuthoritiesAreNotFlagged() {
         XCTAssertFalse(RelayCertificateIssuer.looksLikeInspectingFirewall("Sectigo RSA Domain Validation Secure Server CA"))
         XCTAssertFalse(RelayCertificateIssuer.looksLikeInspectingFirewall("DigiCert TLS RSA SHA256 2020 CA1"))
+        XCTAssertFalse(RelayCertificateIssuer.looksLikeInspectingFirewall("FGHJ Example CA"))
         XCTAssertFalse(RelayCertificateIssuer.looksLikeInspectingFirewall(nil))
         XCTAssertFalse(RelayCertificateIssuer.looksLikeInspectingFirewall(""))
     }

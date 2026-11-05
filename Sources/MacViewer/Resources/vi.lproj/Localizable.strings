@@ -551,3 +551,4 @@
 "Allow all connections without asking" = "Cho phép mọi kết nối mà không cần hỏi";
 "Skips the approval prompt. Anyone with this Mac’s ID and password can see and control it while sharing is on." = "Bỏ qua lời nhắc phê duyệt. Bất kỳ ai có ID và mật khẩu của máy Mac này đều xem và điều khiển được máy khi đang bật chia sẻ.";
 "The viewer stopped responding." = "Máy xem không còn phản hồi.";
+"A firewall on this network (certificate issuer: %@) is inspecting the connection to UltraViewer and cut it. Ask your IT team to exempt *.ultraviewer.net (TCP 443) from SSL inspection, or use another network." = "Tường lửa trên mạng này (nhà phát hành chứng chỉ: %@) đang kiểm tra kết nối tới UltraViewer và đã cắt phiên. Hãy nhờ bộ phận IT loại trừ *.ultraviewer.net (TCP 443) khỏi SSL inspection, hoặc dùng mạng khác.";

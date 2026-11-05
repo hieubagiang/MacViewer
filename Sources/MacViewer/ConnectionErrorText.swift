@@ -7,6 +7,9 @@ func connectionErrorText(_ error: any Error) -> String {
         return LF("The UltraViewer relay assigned to this session (%@) has an invalid security certificate: %@. Try again later.",
                   host, reason) + " " + L("If this keeps happening, you can turn on “Skip the relay certificate check” in Settings.")
     }
+    if case let UltraViewerRelaySession.Failure.relayCutByFirewall(issuer) = error {
+        return LF("A firewall on this network (certificate issuer: %@) is inspecting the connection to UltraViewer and cut it. Ask your IT team to exempt *.ultraviewer.net (TCP 443) from SSL inspection, or use another network.", issuer)
+    }
     guard let network = error as? NWError else { return error.localizedDescription }
     switch network {
     case .dns: return "The UltraViewer relay could not be found. Check your internet connection and try again."
