@@ -15,7 +15,12 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     static func localized(_ key: String, language: AppLanguage = current) -> String {
         let identifier = language == .system
             ? (Locale.preferredLanguages.first?.hasPrefix("vi") == true ? "vi" : "en") : language.rawValue
-        for source in [Bundle.main, Bundle.module] {
+        // A packaged .app keeps its lproj folders in Bundle.main. SwiftPM's Bundle.module
+        // looks for the resource bundle at the app root and falls back to the original
+        // build path, so touching it on another Mac is a fatalError.
+        var sources = [Bundle.main]
+        if Bundle.main.bundleURL.pathExtension != "app" { sources.append(Bundle.module) }
+        for source in sources {
             if let path = source.path(forResource: identifier, ofType: "lproj"), let bundle = Bundle(path: path) {
                 let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
                 if value != key { return value }
