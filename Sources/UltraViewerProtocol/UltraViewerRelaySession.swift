@@ -920,17 +920,34 @@ public actor UltraViewerRelaySession {
             else if previouslyAccepted { try emit(.status("Windows screen refreshed.")) }
             if let upgradingID { await directTransport?.selectCandidate(upgradingID) }
             guard token == generation, phase == .active else { return }
+            // @debug-connect experiment (relay drop after a large first frame): ask for a small
+            // first frame. The host starts streaming on 17 and frame #1 arrives ~100 ms later,
+            // so the requests must go out BEFORE 17 to affect it.
+            //   MACVIEWER_FIRST_QUALITY=<n>   rgb555 + quality n
+            //   MACVIEWER_FIRST_WALLPAPER=0   ask the host to hide its wallpaper (restored by the host at session end)
+            //   MACVIEWER_FIRST_ORDER=after   send after 17 (old behaviour); default is before
+            let environment = ProcessInfo.processInfo.environment
+            let quality = environment["MACVIEWER_FIRST_QUALITY"].flatMap { Int32($0) }
+            let hideWallpaper = environment["MACVIEWER_FIRST_WALLPAPER"] == "0"
+            let sendAfter17 = environment["MACVIEWER_FIRST_ORDER"] == "after"
+            func sendFirstFrameExperiment() async throws {
+                guard !previouslyAccepted, quality != nil || hideWallpaper else { return }
+                ConnectLog.write("experiment: quality=\(quality.map(String.init) ?? "-") hideWallpaper=\(hideWallpaper) order=\(sendAfter17 ? "after" : "before") 17")
+                if let quality {
+                    let rgb = RemoteControlCommands.rgb555ColorMode
+                    let level = RemoteControlCommands.quality(quality)
+                    try await sendToPeer(rgb.payload, formatFlag: rgb.formatFlag)
+                    try await sendToPeer(level.payload, formatFlag: level.formatFlag)
+                }
+                if hideWallpaper {
+                    let wall = RemoteControlCommands.wallpaper(visible: false)
+                    try await sendToPeer(wall.payload, formatFlag: wall.formatFlag)
+                }
+            }
+            if !sendAfter17 { try await sendFirstFrameExperiment() }
             // TCP ConnectionType1: source sends ASCII17 after initialization.
             try await sendToPeer(Data("17".utf8))
-            // Experiment (relay drop after a large first frame): ask for a small first frame.
-            if !previouslyAccepted, let raw = ProcessInfo.processInfo.environment["MACVIEWER_FIRST_QUALITY"],
-               let quality = Int32(raw) {
-                ConnectLog.write("experiment: requesting rgb555 + quality=\(quality) right after 17")
-                let rgb = RemoteControlCommands.rgb555ColorMode
-                let level = RemoteControlCommands.quality(quality)
-                try await sendToPeer(rgb.payload, formatFlag: rgb.formatFlag)
-                try await sendToPeer(level.payload, formatFlag: level.formatFlag)
-            }
+            if sendAfter17 { try await sendFirstFrameExperiment() }
             try await applyFileUpdate(FileTransferEngine.Update())
         case 1:
             guard phase == .active, let renderer else { return }

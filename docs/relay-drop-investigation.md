@@ -1,6 +1,6 @@
 # Relay session drops right after the first frame
 
-Status: **unresolved**. Written 2026-11-05 as a hand-off so the investigation can continue on another machine.
+Status: **root cause found (2026-11-05): TLS inspection by a Fortinet FortiGate on the office network, see "Root cause" below**. Earlier text kept for history. Written 2026-11-05 as a hand-off so the investigation can continue on another machine.
 
 ## Symptom
 
@@ -25,11 +25,24 @@ Not known: whether the relay or the host closes the stream.
 
 - `LinuxViewer` (`linuxviewer snapshot 112293508 ... --frames 3 --no-lan`, with `LINUXVIEWER_INSECURE_RELAY=1` because its TLS roots do not trust the relay) logged in, received 1 frame, saved it, then "The UltraViewer network connection closed." Same host (6.6.108) that drops the Swift client.
 - The Swift client without any experiment flag, via relay `149.28.14.225`, dropped the same way (frame 245 KB, FIN about 1 ms after ACK 18).
-- `MACVIEWER_FIRST_QUALITY=10` earlier did not shrink the first frame (300-317 KB) and still dropped, so hypothesis 1 is effectively ruled out.
+- `MACVIEWER_FIRST_QUALITY=10` earlier did not shrink the first frame (300-317 KB), so it never tested a small frame. Hypothesis 1 (first frame too large for the relay path) is **untested**, not ruled out.
+- Follow-up (2026-11-05): sent `32|||2` + `31|||10` **before** `17` (host echoes 32, so it processed it), and also `23|||0` (hide wallpaper). Frame #1 stayed 304-326 KB and the session still dropped, so the first full frame size cannot be reduced from the viewer. Hypothesis 1 therefore cannot be tested this way. Env: `MACVIEWER_FIRST_QUALITY`, `MACVIEWER_FIRST_WALLPAPER=0`, `MACVIEWER_FIRST_ORDER=after`.
+- Earlier log (host 135774296, 6.6.133, before the tx logging existed) shows the stream cut **mid-frame** (`truncatedFrame`, 55 ms after init, before any ACK). So the cut is not a logical reaction to our ACK or to a complete frame; it happens while the first large burst is in transit. This fits "host-to-relay or relay-to-us path aborts during the first big burst" better than a protocol-level rejection.
+- Commands 3/4/28 received right before the FIN are cursor messages (benign).
 - Two independent clients failing identically points away from a Swift-only bug. Still open: host/relay fault vs. a step both clients omit that the official viewer performs.
 - Next: run the official UltraViewer against the same host; if it survives, capture it with `tcpdump` and diff.
 
-## Hypotheses still open
+## Root cause (found 2026-11-05)
+
+- The same host (112293508, 6.6.108), same relay hostname and same Rust client, run from a datacenter server with no firewall in between (Ubuntu, VN IP, `tcpdump` running): **4/4 sessions survive**, 2 frames received, no FIN. On the office Mac the same client drops after the first frame.
+- Certificate seen for `*.ultraviewer.net`: on the Mac the issuer is `Fortinet ... CN=FG121GTK24002248` (a FortiGate re-signing TLS); on the server it is the real `Sectigo RSA Domain Validation Secure Server CA`. This is also why the Rust client reports `UnknownIssuer` on the Mac while the Swift app works (macOS trusts the corporate CA).
+- So the office firewall does TLS deep inspection and ends the proxied session right after the first large burst (250-490 KB), sometimes mid-frame (`truncatedFrame`). That explains the clean FIN, the lack of any command, and why LAN direct (no firewall) works.
+- Fix is outside the app: ask network admins to exempt `*.ultraviewer.net` (port 443) from SSL deep inspection / IPS, or use a network without it (VPN, hotspot). The "other network" in the evidence list should be checked for a similar middlebox.
+- Cross-check planned: `hieu.pd1`'s machine/network does **not** disconnect (reported by the team). Compare against it: run the Swift app there (`MACVIEWER_AUTOCONNECT=<id>:<password>`), then check the relay certificate issuer on both networks with `echo | openssl s_client -connect functions3.ultraviewer.net:443 -servername ultraviewer 2>/dev/null | openssl x509 -noout -issuer`. A Sectigo issuer there and a Fortinet issuer on the office network confirms the cause.
+- Test server used: `ssh hieuit-cf` (Cloudflare Access, `cloudflared`), Ubuntu 24.04. `/root/LinuxViewer` holds a Rust build (`cargo build --release --no-default-features --features desktop`; Wayland feature needs PipeWire dev packages), `/root/relay.pcap` holds the capture of a surviving session.
+- App-side improvement worth doing: detect a non-Sectigo issuer on the relay certificate and show "A firewall on your network is inspecting the connection; ask IT to exempt *.ultraviewer.net".
+
+## Hypotheses (superseded by the root cause above)
 
 1. The first frame is too large for the relay path (frames of 250–450 KB). Test: `MACVIEWER_FIRST_QUALITY=10` sends `32|||2` and `31|||10` right after `17`; check whether `frame #1 payload=` shrinks and the session survives.
 2. Our `login` parameters make the host behave differently from the official viewer. Compare against a capture of the official UltraViewer.
