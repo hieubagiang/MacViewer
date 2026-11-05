@@ -32,6 +32,10 @@ app_version="${MACVIEWER_VERSION:-${${latest_tag#v}:-0.0.0}}"
 build_number="${MACVIEWER_BUILD_NUMBER:-5}"
 minimum_system_version="${MACVIEWER_MIN_MACOS:-12}.0"
 build_flags=(--configuration "$configuration")
+# MACVIEWER_DEBUG_LOG=1 compiles the connection log and its window into an optimized build.
+if [[ "${MACVIEWER_DEBUG_LOG:-0}" == "1" ]]; then
+  build_flags+=(-Xswiftc -DDEBUG)
+fi
 if [[ "${MACVIEWER_UNIVERSAL:-0}" == "1" ]]; then
   build_flags+=(--arch arm64 --arch x86_64)
 fi

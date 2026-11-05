@@ -29,6 +29,10 @@ struct MacViewerApp: App {
                     applicationDelegate.agents = agents
                     updater.startAutomaticChecks()
                     agents.start()
+                    #if DEBUG
+                    DebugLogWindowController.shared.showOnceAtLaunch()
+                    ConnectLog.write("debug log started pid=\(ProcessInfo.processInfo.processIdentifier) version=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
+                    #endif
                 }
                 .appLanguage()
         }
@@ -40,6 +44,12 @@ struct MacViewerApp: App {
                 Button(L("Check for Updates…")) { updater.check(userInitiated: true) }
             }
             RemoteSessionCommands(model: model)
+            #if DEBUG
+            CommandMenu("Debug") {
+                Button("Connection Log") { DebugLogWindowController.shared.show() }
+                    .keyboardShortcut("l", modifiers: [.command, .option])
+            }
+            #endif
             CommandMenu(L("Connection")) {
                 Button(L("Connect")) { model.connect() }
                     .keyboardShortcut("k", modifiers: [.command])

@@ -379,6 +379,7 @@ public final class ModernScreenRenderer {
             // screen when it sees skippedAtlases grow.
             Logger(subsystem: "dev.macviewer.app", category: "screen").error(
                 "Atlas skipped: atlas=\(atlas.width)x\(atlas.height) tile=\(self.tileSize) rectangles=\(rectangles.count)")
+            ConnectLog.write("atlas skipped: atlas=\(atlas.width)x\(atlas.height) tile=\(self.tileSize) rectangles=\(rectangles.count) skipped=\(skippedAtlases + 1)")
             skippedAtlases += 1
             return
         }

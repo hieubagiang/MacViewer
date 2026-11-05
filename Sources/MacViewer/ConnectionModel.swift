@@ -687,6 +687,7 @@ final class ConnectionModel: ObservableObject {
     }
 
     private func fail(_ error: Error) {
+        ConnectLog.write("UI fail phase=\(phase) error=\(String(describing: error)) text=\(connectionErrorText(error))")
         let hadConnected = phase == .connected
         generation = UUID()
         connectionTask?.cancel(); connectionTask = nil
@@ -709,6 +710,7 @@ final class ConnectionModel: ObservableObject {
     }
 
     private func endSession(message: String) {
+        ConnectLog.write("UI endSession phase=\(phase) message=\(message)")
         generation = UUID()
         connectionTask?.cancel(); connectionTask = nil
         pendingCredential = nil

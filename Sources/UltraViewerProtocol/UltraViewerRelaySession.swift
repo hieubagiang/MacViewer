@@ -179,6 +179,7 @@ public actor UltraViewerRelaySession {
     private var relayPingStarted: UInt64?
     private var peerPingStarted: UInt64?
     private var heartbeatTicks = 0
+    private var outgoingLogged = 0
     private var capturedCommands: Set<UInt8> = []
     private var files = FileTransferEngine()
     private var fileOutbox: [FileTransferMessage] = []
@@ -187,6 +188,8 @@ public actor UltraViewerRelaySession {
     public private(set) var diagnostics = Diagnostics()
     /// Reinitializing an already authenticated peer changes only the screen;
     /// pending files/chat remain available on that same selected route.
+    private var lastRxCommand: UInt8?
+    private var rxCount = 0
     private var canUseSessionTools: Bool {
         diagnostics.peerAccepted && (phase == .active || phase == .login)
     }
@@ -223,8 +226,10 @@ public actor UltraViewerRelaySession {
         self.stallTask?.cancel(); self.stallTask = nil; self.stall = nil
         self.stallRecovering = false
         self.capturedCommands = []
+        self.lastRxCommand = nil; self.rxCount = 0
         let token = UUID()
         generation = token
+        ConnectLog.write("connect start partner=\(partnerID) commandHost=\(configuration.commandHost) listenerPort=\(configuration.listenerPort)")
         phase = .registering
         // Frames take at most one slot (see LatestScreenFrame), so the rest of
         // the buffer absorbs short UI stalls without dropping chat, clipboard
@@ -264,6 +269,7 @@ public actor UltraViewerRelaySession {
         guard phase == .active else { throw Failure.notConnected }
         let token = generation
         diagnostics.screenRefreshes += 1
+        ConnectLog.write("refreshScreen: sending a new Login (refresh #\(diagnostics.screenRefreshes))")
         renderer = nil
         phase = .login
         try emit(.inputPermission(false))
@@ -415,6 +421,7 @@ public actor UltraViewerRelaySession {
             targetPort = port
             phase = .login
             deadline?.cancel()
+            ConnectLog.write("peer found lanIP=\(info.lanIP) publicIP=\(info.publicIP) samePublicIP=\((try? RelayIPv4Address(info.publicIP)) == registrationReply?.publicAddress) relayHost=\(info.relayHostname) hasDirectDetails=\(info.directDetailsField != nil) hasSecretToken=\(info.partnerSecretToken != nil)")
             await configureLANDirect(info, token: token)
             guard generation == token, phase != .closed else { return }
             peerTask = Task { [weak self] in await self?.beginPeer(info, config: config, token: token) }
@@ -423,7 +430,13 @@ public actor UltraViewerRelaySession {
 
     private func prepareLANDirect(_ config: Configuration, registration: ClientRegistration.Reply,
                                   token: UUID) async -> PeerLookup.DirectDetails? {
+        // @debug-connect: MACVIEWER_DISABLE_LAN_DIRECT=1 forces the relay-only path for A/B tests.
+        if ProcessInfo.processInfo.environment["MACVIEWER_DISABLE_LAN_DIRECT"] == "1" {
+            ConnectLog.write("LAN direct disabled by MACVIEWER_DISABLE_LAN_DIRECT")
+            return nil
+        }
         guard config.enableLANDirect, TCPDirectPeerTransport.isLANAddress(config.registration.localAddress) else {
+            ConnectLog.write("LAN direct not offered enable=\(config.enableLANDirect) localAddress=\(config.registration.localAddress)")
             return nil
         }
         let transport = TCPDirectPeerTransport()
@@ -564,6 +577,7 @@ public actor UltraViewerRelaySession {
         guard token == generation, directState.candidates[id] != nil else { return }
         let wasLogin = directState.loginCandidate == id
         let wasSelected = directState.remove(id)
+        ConnectLog.write("direct candidate ended id=\(id.uuidString.prefix(8)) wasLogin=\(wasLogin) wasSelected=\(wasSelected) relayReady=\(relayReady) relayFailed=\(relayFailed) phase=\(phase)")
         if wasSelected {
             // This state transition must precede the first actor hop below.
             // Otherwise the old relay can re-enter against the direct cache.
@@ -620,6 +634,7 @@ public actor UltraViewerRelaySession {
 
     private func relayEnded(_ error: any Swift.Error, token: UUID) async {
         guard token == generation, phase != .closed else { return }
+        ConnectLog.write("relay ended error=\(String(describing: error)) phase=\(phase) directSelected=\(directState.selected != nil) directLogin=\(directState.loginCandidate != nil)")
         relayReady = false
         relayFailed = true
         let transport = peerTransport; peerTransport = nil
@@ -635,13 +650,23 @@ public actor UltraViewerRelaySession {
         guard generation == token, phase != .closed else { return }
         let transport = FramedTCPTransport()
         peerTransport = transport
+        // @debug-connect: relay connection lifetime and traffic, to tell who closed it.
+        var relayFrames = 0, relayBytes = 0
+        var relayOpenedAt: UInt64?
+        func relayStats() -> String {
+            let ms = relayOpenedAt.map { (DispatchTime.now().uptimeNanoseconds - $0) / 1_000_000 }
+            return "aliveMs=\(ms.map { String($0) } ?? "never-opened") frames=\(relayFrames) bytes=\(relayBytes)"
+        }
         do {
             try emit(.status("Connecting to the Windows computer…"))
             let hostname = info.relayHostname.isEmpty ? "functions3.ultraviewer.net" : info.relayHostname
+            ConnectLog.write("relay opening host=\(hostname) ip=\(info.relayIP) port=\(config.listenerPort)")
             let stream = try await transport.open(host: info.relayIP, port: config.listenerPort,
                 security: .tls(serverName: "ultraviewer", certificateName: hostname),
                 initialRequest: RelayHTTPPreamble.request(host: hostname), expectsHTTPResponse: true)
             guard generation == token, phase != .closed else { await transport.close(); return }
+            relayOpenedAt = DispatchTime.now().uptimeNanoseconds
+            ConnectLog.write("relay opened")
             relayReady = true
             relayFailed = false
             diagnostics.peerTransportOpened = true
@@ -657,10 +682,13 @@ public actor UltraViewerRelaySession {
             for try await frame in stream {
                 try Task.checkCancellation()
                 guard generation == token, phase != .closed else { return }
+                relayFrames += 1; relayBytes += frame.count
                 try await consumePeer(frame, token: token)
             }
+            ConnectLog.write("relay stream ended without error (remote FIN) phase=\(self.phase) \(relayStats())")
             if generation == token, phase != .closed { await relayEnded(Failure.relayClosed, token: token) }
         } catch {
+            ConnectLog.write("relay stream threw \(String(describing: error)) phase=\(self.phase) \(relayStats())")
             if generation == token { await relayEnded(error, token: token) }
         }
     }
@@ -698,8 +726,19 @@ public actor UltraViewerRelaySession {
     }
 
     private func consumePeer(_ bytes: Data, token: UUID) async throws {
-        let envelope = try RelayEnvelope.decode(bytes)
+        let envelope: RelayEnvelope
+        do { envelope = try RelayEnvelope.decode(bytes) }
+        catch {
+            ConnectLog.write("relay frame undecodable bytes=\(bytes.count) head=\(bytes.prefix(16).map { String(format: "%02x", $0) }.joined()) error=\(error)")
+            throw error
+        }
         if case let .system(payload) = envelope {
+            if payload != Data("pong".utf8) {
+                // @debug-connect: a relay notice (e.g. peer gone) would otherwise be dropped silently.
+                let text = String(decoding: payload.prefix(64), as: UTF8.self).unicodeScalars
+                    .map { $0.value >= 32 && $0.value < 127 ? String($0) : "." }.joined()
+                ConnectLog.write("relay system message bytes=\(payload.count) text=\(text) hex=\(payload.prefix(24).map { String(format: "%02x", $0) }.joined())")
+            }
             if payload == Data("pong".utf8) {
                 diagnostics.relayPongsReceived += 1
                 if let started = relayPingStarted {
@@ -710,6 +749,9 @@ public actor UltraViewerRelaySession {
             return
         }
         guard case let .forward(address, port, _, payload) = envelope else { return }
+        if address != targetAddress || port != targetPort {
+            ConnectLog.write("relay forward from unexpected source \(address):\(port) expected=\(targetAddress.map { "\($0):\(targetPort ?? 0)" } ?? "nil") bytes=\(payload.count)")
+        }
         // Windows can keep session tools on the original relay while screens
         // use LAN. A known relay may deliver only authenticated auxiliary data;
         // it cannot overwrite direct initialization, permissions or screen ACKs.
@@ -761,7 +803,10 @@ public actor UltraViewerRelaySession {
                 // a complete ordinary Login initialization. Ignore all screen,
                 // permission, chat and input traffic until that point.
                 guard command == 0 else {
-                    if [22, 27, 39, 41, 54].contains(command) { throw Failure.closed }
+                    if [22, 27, 39, 41, 54].contains(command) {
+                        ConnectLog.write("direct candidate sent end command=\(command) before selection")
+                        throw Failure.closed
+                    }
                     return
                 }
                 guard parts.count >= 11 else { throw Failure.malformedInitialization }
@@ -772,6 +817,11 @@ public actor UltraViewerRelaySession {
                 isActive: canUseSessionTools,
                 isKnownSource: relayAddress == targetAddress && relayPort == targetPort) else { return }
         }
+        // @debug-connect: log each command type once per session, and remember the last one.
+        if !diagnostics.receivedCommands.contains(command) {
+            ConnectLog.write("rx first command=\(command) parts=\(parts.count) source=\(source) phase=\(self.phase)")
+        }
+        lastRxCommand = command; rxCount += 1
         if diagnostics.receivedCommands.count < 128 { diagnostics.receivedCommands.append(command) }
         diagnostics.latestPartLengths = Array(parts.prefix(32)).map(\.count)
         if command == 0 || command == 1 { try capture(payload, command: command) }
@@ -811,6 +861,7 @@ public actor UltraViewerRelaySession {
             let geometryChanged = upgradingID != nil || renderer?.width != initialization.width || renderer?.height != initialization.height
             if geometryChanged, parts.count > 13, parts[13].isEmpty { throw Failure.malformedInitialization }
             let version = initialization.targetVersionBytes.map { String(decoding: $0, as: UTF8.self) } ?? ""
+            ConnectLog.write("host initialization \(initialization.width)x\(initialization.height) tile=\(initialization.tileSize) parts=\(parts.count) hostVersion=\(version) source=\(source) geometryChanged=\(geometryChanged)")
             guard Self.version(version, atLeast: [6, 0, 0]) else { throw Failure.unsupportedVersion }
             if geometryChanged {
                 let fresh = try ModernScreenRenderer(width: initialization.width, height: initialization.height,
@@ -871,6 +922,15 @@ public actor UltraViewerRelaySession {
             guard token == generation, phase == .active else { return }
             // TCP ConnectionType1: source sends ASCII17 after initialization.
             try await sendToPeer(Data("17".utf8))
+            // Experiment (relay drop after a large first frame): ask for a small first frame.
+            if !previouslyAccepted, let raw = ProcessInfo.processInfo.environment["MACVIEWER_FIRST_QUALITY"],
+               let quality = Int32(raw) {
+                ConnectLog.write("experiment: requesting rgb555 + quality=\(quality) right after 17")
+                let rgb = RemoteControlCommands.rgb555ColorMode
+                let level = RemoteControlCommands.quality(quality)
+                try await sendToPeer(rgb.payload, formatFlag: rgb.formatFlag)
+                try await sendToPeer(level.payload, formatFlag: level.formatFlag)
+            }
             try await applyFileUpdate(FileTransferEngine.Update())
         case 1:
             guard phase == .active, let renderer else { return }
@@ -883,16 +943,21 @@ public actor UltraViewerRelaySession {
                 diagnostics.decodeNanoseconds += elapsed
                 diagnostics.maximumDecodeNanoseconds = max(diagnostics.maximumDecodeNanoseconds, elapsed)
                 diagnostics.decodedFrames += 1
+                if diagnostics.decodedFrames <= 5 {
+                    ConnectLog.write("frame #\(diagnostics.decodedFrames) decoded in \(elapsed / 1_000_000) ms payload=\(payload.count) parts=\(parts.count) atlasSkipped=\(renderer.skippedAtlases != skippedBefore); sending ack 18")
+                }
                 if latestFrame.put(bitmap) { try emit(.frame(latestFrame)) }
                 // Backpressure follows successful decoding, so a slow client
                 // cannot acknowledge a growing queue of stale screen updates.
                 try await sendToPeer(Data("18".utf8))
                 if renderer.skippedAtlases != skippedBefore {
                     diagnostics.lastScreenFailure = "auxiliaryAtlasSkipped"
+                    ConnectLog.write("requesting screen refresh (re-login) because an atlas was skipped")
                     try await refreshScreenAfterDamage()
                 }
             } catch let error as ModernScreenMessageError {
                 diagnostics.lastScreenFailure = String(describing: error)
+                ConnectLog.write("frame decode failed: \(error) payload=\(payload.count) parts=\(parts.count); sending ack 18 then screen refresh (re-login)")
                 try await sendToPeer(Data("18".utf8))
                 // A malformed drawing mission must not tear down an
                 // authenticated connection. A new full initialization resets the
@@ -926,6 +991,7 @@ public actor UltraViewerRelaySession {
             // Native stores DefaultFrameWidthHeight whenever 48 arrives, also
             // between a re-login and its initialization.
             try renderer?.setTileSize(parts: parts)
+            ConnectLog.write("command 48 tile size=\(parts.count > 1 ? Int(parts[1].first ?? 0) : -1) renderer=\(renderer == nil ? "absent" : "present")")
             Logger(subsystem: "dev.macviewer.app", category: "screen").notice(
                 "Command 48 tile size \(parts.count > 1 ? Int(parts[1].first ?? 0) : -1), renderer \(self.renderer == nil ? "absent" : "present")")
         case 49:
@@ -943,6 +1009,13 @@ public actor UltraViewerRelaySession {
 
     private func sendToPeer(_ payload: Data, formatFlag: Bool = false, source: PeerSource? = nil) async throws {
         let destination = source ?? directState.selected.map(PeerSource.direct) ?? .relay
+        if ConnectLog.isEnabled, outgoingLogged < 30 {
+            outgoingLogged += 1
+            // Command token only (text before "|||"), never the arguments.
+            let head = payload.prefix(24)
+            let token = String(decoding: head.prefix { $0 != 0x7C && $0 >= 0x20 && $0 < 0x7F }, as: UTF8.self)
+            ConnectLog.write("tx #\(outgoingLogged) cmd=\(token.isEmpty ? "bin" : token) bytes=\(payload.count) flag=\(formatFlag) via=\(destination == .relay ? "relay" : "direct") phase=\(phase)")
+        }
         switch destination {
         case let .direct(id):
             guard directState.selected == id || directState.loginCandidate == id,
@@ -1079,6 +1152,7 @@ public actor UltraViewerRelaySession {
     }
 
     private func emit(_ event: Event) throws {
+        if case let .status(text) = event { ConnectLog.write("status: \(text)") }
         switch events?.yield(event) {
         case .terminated: throw CancellationError()
         case .dropped:
@@ -1093,8 +1167,10 @@ public actor UltraViewerRelaySession {
         }
     }
 
-    private func finish(_ error: (any Swift.Error)?) async {
+    private func finish(_ error: (any Swift.Error)?, file: StaticString = #fileID, line: UInt = #line) async {
         guard phase != .closed else { return }
+        // @debug-connect: log who ended the session and how far it got.
+        ConnectLog.write("finish from \(file):\(line) phase=\(phase) error=\(error.map { String(describing: $0) } ?? "nil") registration=\(diagnostics.registrationAccepted) lookup=\(diagnostics.lookupStatus.map { String($0) } ?? "nil") peerTransport=\(diagnostics.peerTransportOpened) loginSent=\(diagnostics.loginSent) peerAccepted=\(diagnostics.peerAccepted) relayReady=\(relayReady) relayFailed=\(relayFailed) lanAdvertised=\(diagnostics.lanDirectAdvertised) lanCandidates=\(diagnostics.lanDirectCandidates) lanActive=\(diagnostics.lanDirectActive) lanFallbacks=\(diagnostics.lanDirectFallbacks) commands=\(diagnostics.receivedCommands.map { String($0) }.joined(separator: ",")) lastCommand=\(lastRxCommand.map { String($0) } ?? "nil") rxCount=\(rxCount) decodedFrames=\(diagnostics.decodedFrames) screenRefreshes=\(diagnostics.screenRefreshes) lastScreenFailure=\(diagnostics.lastScreenFailure ?? "nil") maxDecodeMs=\(diagnostics.maximumDecodeNanoseconds / 1_000_000) ignoredSources=\(diagnostics.ignoredSources) relayPongs=\(diagnostics.relayPongsReceived) relayKeepalivesSent=\(diagnostics.relayKeepalivesSent) commandLinkLost=\(diagnostics.commandLinkLost) directSelected=\(directState.selected != nil)")
         phase = .closed
         diagnostics.closeReason = error.map { String(describing: $0) }
         files.reset(); fileOutbox.removeAll(); fileSendRevision = UUID(); fileSending = false
