@@ -107,6 +107,8 @@ public actor UltraViewerRelaySession {
         case commandClosed
         /// The relay carrying the session closed its connection.
         case relayClosed
+        /// The relay closed after a TLS-inspecting firewall re-signed its certificate.
+        case relayCutByFirewall(issuer: String)
         /// The Windows computer sent an explicit end-of-session command.
         case endedByPeer
         case wrongPassword, lookupRejected(Int32), invalidLookupRoute, partnerBlocked
@@ -121,6 +123,7 @@ public actor UltraViewerRelaySession {
             case .closed: "The remote computer disconnected."
             case .commandClosed: "The UltraViewer service closed the connection before the Windows computer was found."
             case .relayClosed: "The relay connection to the Windows computer closed."
+            case let .relayCutByFirewall(issuer): RelayCertificateIssuer.firewallAdvice(issuer: issuer)
             case .endedByPeer: "The Windows computer ended the session."
             case .wrongPassword: "UltraViewer rejected the partner password."
             case let .lookupRejected(code): "UltraViewer declined the partner lookup (code \(code))."
@@ -653,6 +656,7 @@ public actor UltraViewerRelaySession {
         // @debug-connect: relay connection lifetime and traffic, to tell who closed it.
         var relayFrames = 0, relayBytes = 0
         var relayOpenedAt: UInt64?
+        var relayIssuer: String?
         func relayStats() -> String {
             let ms = relayOpenedAt.map { (DispatchTime.now().uptimeNanoseconds - $0) / 1_000_000 }
             return "aliveMs=\(ms.map { String($0) } ?? "never-opened") frames=\(relayFrames) bytes=\(relayBytes)"
@@ -666,7 +670,8 @@ public actor UltraViewerRelaySession {
                 initialRequest: RelayHTTPPreamble.request(host: hostname), expectsHTTPResponse: true)
             guard generation == token, phase != .closed else { await transport.close(); return }
             relayOpenedAt = DispatchTime.now().uptimeNanoseconds
-            ConnectLog.write("relay opened")
+            relayIssuer = await transport.relayCertificateIssuer
+            ConnectLog.write("relay opened certIssuer=\(relayIssuer ?? "unknown")")
             relayReady = true
             relayFailed = false
             diagnostics.peerTransportOpened = true
@@ -686,10 +691,17 @@ public actor UltraViewerRelaySession {
                 try await consumePeer(frame, token: token)
             }
             ConnectLog.write("relay stream ended without error (remote FIN) phase=\(self.phase) \(relayStats())")
-            if generation == token, phase != .closed { await relayEnded(Failure.relayClosed, token: token) }
+            if generation == token, phase != .closed {
+                let firewall = RelayCertificateIssuer.looksLikeInspectingFirewall(relayIssuer)
+                await relayEnded(firewall ? Failure.relayCutByFirewall(issuer: relayIssuer ?? "") : Failure.relayClosed, token: token)
+            }
         } catch {
             ConnectLog.write("relay stream threw \(String(describing: error)) phase=\(self.phase) \(relayStats())")
-            if generation == token { await relayEnded(error, token: token) }
+            // A cut mid-frame is the same firewall symptom as a clean FIN.
+            let cut = (error as? FramedTCPTransport.Error).map { $0 == .truncatedFrame || $0 == .closed } ?? false
+            let reported: any Swift.Error = cut && RelayCertificateIssuer.looksLikeInspectingFirewall(relayIssuer)
+                ? Failure.relayCutByFirewall(issuer: relayIssuer ?? "") : error
+            if generation == token { await relayEnded(reported, token: token) }
         }
     }
 

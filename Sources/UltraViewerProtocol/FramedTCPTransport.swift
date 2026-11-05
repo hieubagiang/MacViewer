@@ -54,6 +54,8 @@ public actor FramedTCPTransport {
     private var certificateRejection = CertificateRejection()
     private var certificateHost = ""
     private let maximumPayloadLength: Int
+    /// CA that signed the relay certificate seen by the latest TLS open.
+    public var relayCertificateIssuer: String? { certificateRejection.issuer }
     /// Latest opened stream's HTTP status, retained after close for diagnostics.
     public private(set) var receivedHTTPStatusCode: Int?
 
@@ -175,6 +177,7 @@ public actor FramedTCPTransport {
     /// still connects to them, so an expired certificate is accepted when it
     /// is otherwise valid: issued by a trusted authority for this name.
     nonisolated static func verify(_ trust: SecTrust, name: String, rejection: CertificateRejection) -> Bool {
+        rejection.issuer = issuerSummary(of: trust)
         let policy = SecPolicyCreateSSL(true, name as CFString)
         guard SecTrustSetPolicies(trust, policy) == errSecSuccess else {
             if UserDefaults.standard.bool(forKey: skipCertificateCheckKey) { return true }
@@ -197,6 +200,21 @@ public actor FramedTCPTransport {
         if UserDefaults.standard.bool(forKey: skipCertificateCheckKey) { return true }
         rejection.reason = error.map(reasonText) ?? firstReason
         return false
+    }
+
+    /// Name of the certificate that signed the leaf (second in the chain); the
+    /// leaf's own name when the server sent no issuer.
+    private nonisolated static func issuerSummary(of trust: SecTrust) -> String? {
+        var chain: [SecCertificate] = []
+        if #available(macOS 12, *) {
+            chain = (SecTrustCopyCertificateChain(trust) as? [SecCertificate]) ?? []
+        } else {
+            for index in 0..<SecTrustGetCertificateCount(trust) {
+                if let certificate = SecTrustGetCertificateAtIndex(trust, index) { chain.append(certificate) }
+            }
+        }
+        guard let certificate = chain.count > 1 ? chain[1] : chain.first else { return nil }
+        return SecCertificateCopySubjectSummary(certificate) as String?
     }
 
     private nonisolated static func reasonText(_ error: CFError) -> String {
@@ -289,9 +307,16 @@ public actor FramedTCPTransport {
 final class CertificateRejection: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: String?
+    private var storedIssuer: String?
 
     var reason: String? {
         get { lock.lock(); defer { lock.unlock() }; return stored }
         set { lock.lock(); stored = newValue; lock.unlock() }
+    }
+
+    /// Subject of the CA that signed the relay's leaf certificate.
+    var issuer: String? {
+        get { lock.lock(); defer { lock.unlock() }; return storedIssuer }
+        set { lock.lock(); storedIssuer = newValue; lock.unlock() }
     }
 }
