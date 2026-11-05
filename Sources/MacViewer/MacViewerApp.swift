@@ -32,6 +32,16 @@ struct MacViewerApp: App {
                     #if DEBUG
                     DebugLogWindowController.shared.showOnceAtLaunch()
                     ConnectLog.write("debug log started pid=\(ProcessInfo.processInfo.processIdentifier) version=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
+                    // Debug only: MACVIEWER_AUTOCONNECT=<id>:<password> connects once at launch.
+                    if let spec = ProcessInfo.processInfo.environment["MACVIEWER_AUTOCONNECT"],
+                       let colon = spec.firstIndex(of: ":"), !model.isSessionActive {
+                        // Skip Keychain reads/writes: an unsigned debug build would block on its prompt.
+                        model.setRememberPassword(false)
+                        model.partnerID = String(spec[..<colon])
+                        model.password = String(spec[spec.index(after: colon)...])
+                        ConnectLog.write("autoconnect requested partner=\(model.partnerID)")
+                        model.connect()
+                    }
                     #endif
                 }
                 .appLanguage()

@@ -21,6 +21,14 @@ The same hosts can work over **LAN direct** (`TCPDirectPeerTransport`). The drop
 
 Not known: whether the relay or the host closes the stream.
 
+### Update 2026-11-05 (later): Rust client reproduces the drop
+
+- `LinuxViewer` (`linuxviewer snapshot 112293508 ... --frames 3 --no-lan`, with `LINUXVIEWER_INSECURE_RELAY=1` because its TLS roots do not trust the relay) logged in, received 1 frame, saved it, then "The UltraViewer network connection closed." Same host (6.6.108) that drops the Swift client.
+- The Swift client without any experiment flag, via relay `149.28.14.225`, dropped the same way (frame 245 KB, FIN about 1 ms after ACK 18).
+- `MACVIEWER_FIRST_QUALITY=10` earlier did not shrink the first frame (300-317 KB) and still dropped, so hypothesis 1 is effectively ruled out.
+- Two independent clients failing identically points away from a Swift-only bug. Still open: host/relay fault vs. a step both clients omit that the official viewer performs.
+- Next: run the official UltraViewer against the same host; if it survives, capture it with `tcpdump` and diff.
+
 ## Hypotheses still open
 
 1. The first frame is too large for the relay path (frames of 250–450 KB). Test: `MACVIEWER_FIRST_QUALITY=10` sends `32|||2` and `31|||10` right after `17`; check whether `frame #1 payload=` shrinks and the session survives.
@@ -34,6 +42,7 @@ Not known: whether the relay or the host closes the stream.
 - `MACVIEWER_DEBUG_LOG=1 scripts/package_app.sh release` compiles the logging into an optimized build (debug builds decode a 3840x1080 frame in ~800 ms, which distorts timings).
 - `MACVIEWER_DISABLE_LAN_DIRECT=1` forces relay only.
 - `MACVIEWER_FIRST_QUALITY=<n>` experiment described above.
+- `MACVIEWER_AUTOCONNECT=<id>:<password>` (debug builds) connects at launch and turns off remember-password (avoids a Keychain prompt that blocks unsigned builds).
 
 ## Next steps
 
