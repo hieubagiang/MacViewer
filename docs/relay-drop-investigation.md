@@ -98,6 +98,12 @@ Tested on the office network with a real session: tunnel up in 1.3 s, `relay ope
 
 Not done: the `socks5s://` experiment (low value now that this works). `swift test` cannot run here (no Xcode, no `Testing` module); `Tests/UltraViewerProtocolTests/SSHTunnelTests.swift` is written but unrun.
 
+## Status 2026-11-06 (later): `socks5s://` works behind the FortiGate
+
+Proxy = `socks5s://macviewer:<password>@px.<domain>` (user/password can also go in the Settings fields). Tested on the office network: relay issuer Sectigo, frames #1 (97 KB) and #2 decoded, session alive 75 s with relay pings answered, no cut. The outer TLS to the proxy host is still re-signed by the FortiGate (issuer `FG121GTK24002248`), so the old theory holds: it is the plaintext HTTP `CONNECT` inside that triggers the second inspection; SOCKS5 inside the TLS is not re-inspected.
+
+Server side (no secrets here): a separate `xray-s5.service` (own config in `/etc/xray-s5/`, user `nobody`) with one `socks` inbound on `127.0.0.1:1081`, password auth. The existing xray/VPN is untouched. In `/etc/nginx/nginx.conf` the stream server on `127.0.0.1:8446` (SNI `px.<domain>`) now proxies to `127.0.0.1:1081` instead of Squid `3128` (backup: `nginx.conf.bak-s5-*`), so `https://` HTTP-CONNECT proxy no longer works on that host. Squid is still running on 3128 but unreachable from outside; remove it if not needed. The password is in `/etc/xray-s5/config.json` on the server only.
+
 ## Hypotheses (superseded by the root cause above)
 
 1. The first frame is too large for the relay path (frames of 250–450 KB). Test: `MACVIEWER_FIRST_QUALITY=10` sends `32|||2` and `31|||10` right after `17`; check whether `frame #1 payload=` shrinks and the session survives.
