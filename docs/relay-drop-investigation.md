@@ -42,6 +42,20 @@ Not known: whether the relay or the host closes the stream.
 - Test server used: `ssh hieuit-cf` (Cloudflare Access, `cloudflared`), Ubuntu 24.04. `/root/LinuxViewer` holds a Rust build (`cargo build --release --no-default-features --features desktop`; Wayland feature needs PipeWire dev packages), `/root/relay.pcap` holds the capture of a surviving session.
 - App-side improvement worth doing: detect a non-Sectigo issuer on the relay certificate and show "A firewall on your network is inspecting the connection; ask IT to exempt *.ultraviewer.net".
 
+## Workaround: relay through a SOCKS5 proxy (2026-11-06)
+
+When IT cannot exempt `*.ultraviewer.net`, send the connection through a server whose path is not inspected.
+
+1. Open a SOCKS5 proxy over a path the firewall allows, for example `ssh -N -D 1080 <server>` (works through a Cloudflare Tunnel too).
+2. In MacViewer: Settings > General > Network > "SOCKS5 proxy (host:port)" = `127.0.0.1:1080`, or launch with `MACVIEWER_SOCKS5=127.0.0.1:1080`. Empty means direct.
+3. Reconnect. In debug builds the log shows `via SOCKS5 proxy ... -> relayIP:443` for the ID-server and relay connections.
+
+How it works: `SOCKS5Bridge` listens once on 127.0.0.1, does the SOCKS5 no-auth CONNECT to the real relay, and copies bytes. The app's TLS handshake still runs end to end with the relay, so certificates are verified as before and the proxy only carries encrypted bytes. Works on every supported macOS (no `ProxyConfiguration`, which needs macOS 14). LAN direct does not use the proxy.
+
+Verified here (no firewall on this network, so this proves the bridge, not the firewall bypass): unit tests (`SOCKS5BridgeTests`, 200 KB round trip, refused CONNECT, unreachable proxy) and a live session through a local SOCKS5 proxy, relay opened, frames decoded, session alive 13 s+. Not yet verified: on the office network behind the FortiGate.
+
+This is a way around a corporate control. Prefer asking IT for the exemption when possible.
+
 ## Hypotheses (superseded by the root cause above)
 
 1. The first frame is too large for the relay path (frames of 250–450 KB). Test: `MACVIEWER_FIRST_QUALITY=10` sends `32|||2` and `31|||10` right after `17`; check whether `frame #1 payload=` shrinks and the session survives.

@@ -15,6 +15,7 @@ public actor FramedTCPTransport {
         case closed
         case truncatedFrame
         case consumerTooSlow
+        case proxyFailed(String)
 
         public var errorDescription: String? {
             switch self {
@@ -26,6 +27,7 @@ public actor FramedTCPTransport {
             case .notOpen, .closed: "The UltraViewer network connection closed. Try connecting again."
             case .truncatedFrame: "The relay connection ended before an update finished. Try connecting again."
             case .consumerTooSlow: "The remote connection could not process its updates. Try connecting again."
+            case let .proxyFailed(reason): "The SOCKS5 proxy for the relay failed: \(reason). Check the proxy setting or turn it off."
             }
         }
     }
@@ -40,6 +42,7 @@ public actor FramedTCPTransport {
     }
 
     private var connection: NWConnection?
+    private var bridge: SOCKS5Bridge?
     private var opening: CheckedContinuation<Void, any Swift.Error>?
     private var receiver: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
@@ -104,11 +107,22 @@ public actor FramedTCPTransport {
         }
         let token = UUID()
         identity = token
-        let client = NWConnection(host: NWEndpoint.Host(host), port: endpointPort, using: parameters)
-        connection = client
-        ready = false
+        var dialHost = NWEndpoint.Host(host)
+        var dialPort = endpointPort
         receivedHTTPStatusCode = nil
         do {
+            if let proxy = RelayProxy.configured {
+                ConnectLog.write("via SOCKS5 proxy \(proxy.host):\(proxy.port) -> \(host):\(port)")
+                let proxyBridge = SOCKS5Bridge(proxy: proxy, targetHost: host, targetPort: port)
+                bridge = proxyBridge
+                let localPort = try await proxyBridge.start()
+                guard identity == token else { proxyBridge.cancel(); throw Error.closed }
+                dialHost = NWEndpoint.Host("127.0.0.1")
+                dialPort = NWEndpoint.Port(rawValue: localPort) ?? endpointPort
+            }
+            let client = NWConnection(host: dialHost, port: dialPort, using: parameters)
+            connection = client
+            ready = false
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
                     opening = continuation
@@ -141,8 +155,10 @@ public actor FramedTCPTransport {
             }
             return pair.stream
         } catch {
-            if identity == token { finish(error) }
-            throw error
+            // A failed proxy leg shows up as a generic closed connection; name it.
+            let reported: any Swift.Error = bridge?.failureReason.map { Error.proxyFailed($0) } ?? error
+            if identity == token { finish(reported) }
+            throw reported
         }
     }
 
@@ -294,6 +310,8 @@ public actor FramedTCPTransport {
         connection = nil
         client?.stateUpdateHandler = nil
         client?.cancel()
+        bridge?.cancel()
+        bridge = nil
         receiver?.cancel()
         receiver = nil
         let stream = frames

@@ -95,6 +95,7 @@ struct MacViewerSettings: View {
     @AppStorage(MacRegistrationProfile.displayNameKey) private var displayName = ""
     @AppStorage(ReceivedFilesFolder.key) private var receivedFolder = ""
     @AppStorage(FramedTCPTransport.skipCertificateCheckKey) private var skipCertificateCheck = false
+    @AppStorage(RelayProxy.defaultsKey) private var relayProxy = ""
 
     var body: some View {
         TabView {
@@ -191,6 +192,14 @@ struct MacViewerSettings: View {
                     Text("Scroll speed")
                 }
                 LabeledRow("Scroll speed", value: String(format: "%.2g×", scrollSensitivity))
+            }
+            Section(header: Text("Network")) {
+                TextField("SOCKS5 proxy (host:port)", text: $relayProxy)
+                    .disableAutocorrection(true)
+                Text(RelayProxy.parse(relayProxy) == nil && !relayProxy.trimmingCharacters(in: .whitespaces).isEmpty
+                     ? "Not a valid host:port. The proxy is ignored."
+                     : "Optional. Sends the UltraViewer connection through a SOCKS5 proxy, for example 127.0.0.1:1080 after running: ssh -N -D 1080 your-server. Leave empty to connect directly. Restart the connection after changing it.")
+                    .font(.caption).foregroundColor(.secondary)
             }
             Section(header: Text("Connection security")) {
                 Toggle("Skip the relay certificate check", isOn: $skipCertificateCheck)
