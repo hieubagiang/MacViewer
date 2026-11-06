@@ -109,7 +109,7 @@ Server side (no secrets here): a separate `xray-s5.service` (own config in `/etc
 If the UltraViewer protocol never crosses the office network (a server speaks it and streams the screen to a browser over HTTPS/WebSocket), the FortiGate has nothing it recognizes. `scripts/wstest/` (see its README) checks that cheaply: a WebSocket that sends a 450 KB burst plus a steady stream for 60 s.
 
 - Dev Mac, host behind Cloudflare's proxy, TLS re-signed by the FortiGate: ALIVE, 1.1 MB in 20 s, ping median 87 ms.
-- Office Mac (the one that gets cut): run `https://<host>/wstest/` in a browser and record ALIVE/CUT here. Not run yet.
+- Office Mac (the one that gets cut), `ws_client.py` from the terminal, TLS issuer `FG121GTK24002248` (re-signed by the FortiGate): **ALIVE** after 60 s, 2.7 MB in 606 messages, the 450 KB first burst arrived in 498 ms, ping median 79 ms (p95 454 ms, 59 pongs). So a long WebSocket with UltraViewer-like traffic is not cut, even with the first big burst. A browser run of `/wstest/` was not done.
 - Server measured: 2 vCPU Xeon 2.6 GHz, 3.9 GB RAM, ~220 Mbps up / ~280 Mbps down, 20 ms to the UltraViewer ID server. Estimated (not measured): server-side decode plus re-encode costs about 50-70% of a core per heavy session, under 5% per light session, so CPU is the limit (2-3 heavy or 20-30 light sessions). A WebSocket-to-TCP gateway with the client in WASM would need almost no server CPU.
 
 ## Hypotheses (superseded by the root cause above)
