@@ -70,6 +70,24 @@ Many corporate networks only allow outbound 443 to unknown hosts, so a plain pro
 
 Verified: `curl --proxy https://px.<domain>:443 --proxy-user user:pass https://api.ipify.org` returns the server's IP, a wrong password gets 407, and the app's ID-server lookup went through it. A full relay session through this HTTPS proxy was not re-run because the test host rotated its password.
 
+## Status 2026-11-06 (latest): HTTPS proxy is still cut on the office network
+
+Behind the FortiGate, with Proxy = `https://user:pass@px.<domain>` (HTTP CONNECT inside TLS on 443):
+
+- The proxy works: ID lookup and relay open go through it (`via proxy https://***@px.<domain>:443 -> relayIP:443`).
+- But `relay opened certIssuer=FG121GTK24002248`, i.e. the relay's own TLS certificate was re-signed by the FortiGate **inside** the tunnel (through `ssh -D` the issuer was Sectigo). The session is cut after frame #1 (94-96 KB) with `relayCutByFirewall`, as without a proxy.
+- Working theory (unconfirmed): the FortiGate decrypts the outer TLS to the proxy host, sees the plaintext `CONNECT host:443` line, treats it as a proxy tunnel and inspects the tunneled TLS again. `ssh -D` over a Cloudflare tunnel is not parsed that way.
+- Confirm on the office Mac: `echo | openssl s_client -connect px.<domain>:443 -servername px.<domain> 2>/dev/null | openssl x509 -noout -issuer`. `Fortinet...` means the outer layer is intercepted (theory holds); `Let's Encrypt` means it is not and the theory is wrong.
+
+What works today on that network: `ssh -N -D 1080 <server>` through a Cloudflare tunnel, with Proxy = `127.0.0.1:1080` (15 s+ session, 23 frames, relay ping answered).
+
+### Next steps (for the next session)
+
+1. Run the confirm command above and record the issuer here.
+2. If the outer layer is intercepted, try a payload that is not an HTTP CONNECT: SOCKS5 inside TLS (`socks5s://`). Server side needs a SOCKS5 server (for example a separate xray instance with a `socks` inbound and auth, or dante) behind the same nginx `stream` TLS terminator on a second SNI. Client side already supports `socks5s://` and user/password; the TLS leg has only been exercised against the HTTP variant. Risk: the FortiGate may recognize SOCKS and block it.
+3. If that fails too, tunnel something the FortiGate cannot parse (WebSocket-wrapped stream, or SSH over a Cloudflare tunnel as above) and add a built-in "SSH tunnel" option to the app, or keep using `ssh -D`.
+4. Best long-term fix remains asking IT to exempt `*.ultraviewer.net` TCP 443 from SSL inspection / IPS; give them the issuer `FG121GTK24002248`.
+
 ## Hypotheses (superseded by the root cause above)
 
 1. The first frame is too large for the relay path (frames of 250–450 KB). Test: `MACVIEWER_FIRST_QUALITY=10` sends `32|||2` and `31|||10` right after `17`; check whether `frame #1 payload=` shrinks and the session survives.
