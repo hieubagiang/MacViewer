@@ -1,0 +1,64 @@
+name: Windows build (LinuxViewer)
+
+# Builds the Rust viewer as a portable .exe so it can be tried on a Windows PC
+# without installing anything. Experimental: the desktop viewer has not been
+# tested on Windows yet, and the proxy options (socks5s://, ssh://) exist only
+# in the Swift app, so this build is cut by a TLS-inspecting firewall like the
+# first Mac build was.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "LinuxViewer/**"
+      - ".github/workflows/windows.yml"
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: LinuxViewer for Windows (Rust)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: LinuxViewer
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LinuxViewer
+
+      - name: Toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      # No `wayland` feature: it is Linux only.
+      - name: Build
+        run: cargo build --release --locked --no-default-features --features desktop
+
+      - name: Smoke test
+        continue-on-error: true
+        run: .\target\release\linuxviewer.exe --help
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target\release\linuxviewer.exe dist\linuxviewer.exe
+          Compress-Archive -Path dist\linuxviewer.exe -DestinationPath dist\linuxviewer-windows-x86_64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linuxviewer-windows-x86_64-${{ github.sha }}
+          path: |
+            LinuxViewer/dist/linuxviewer.exe
+            LinuxViewer/dist/linuxviewer-windows-x86_64.zip
+          retention-days: 14
