@@ -27,7 +27,7 @@ public actor FramedTCPTransport {
             case .notOpen, .closed: "The UltraViewer network connection closed. Try connecting again."
             case .truncatedFrame: "The relay connection ended before an update finished. Try connecting again."
             case .consumerTooSlow: "The remote connection could not process its updates. Try connecting again."
-            case let .proxyFailed(reason): "The SOCKS5 proxy for the relay failed: \(reason). Check the proxy setting or turn it off."
+            case let .proxyFailed(reason): "The proxy for the relay failed: \(reason). Check the proxy setting or turn it off."
             }
         }
     }
@@ -42,7 +42,7 @@ public actor FramedTCPTransport {
     }
 
     private var connection: NWConnection?
-    private var bridge: SOCKS5Bridge?
+    private var bridge: ProxyBridge?
     private var opening: CheckedContinuation<Void, any Swift.Error>?
     private var receiver: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
@@ -112,8 +112,8 @@ public actor FramedTCPTransport {
         receivedHTTPStatusCode = nil
         do {
             if let proxy = RelayProxy.configured {
-                ConnectLog.write("via SOCKS5 proxy \(proxy.host):\(proxy.port) -> \(host):\(port)")
-                let proxyBridge = SOCKS5Bridge(proxy: proxy, targetHost: host, targetPort: port)
+                ConnectLog.write("via proxy \(proxy.summary) -> \(host):\(port)")
+                let proxyBridge = ProxyBridge(proxy: proxy, targetHost: host, targetPort: port)
                 bridge = proxyBridge
                 let localPort = try await proxyBridge.start()
                 guard identity == token else { proxyBridge.cancel(); throw Error.closed }

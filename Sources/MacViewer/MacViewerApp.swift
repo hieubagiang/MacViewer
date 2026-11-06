@@ -96,6 +96,8 @@ struct MacViewerSettings: View {
     @AppStorage(ReceivedFilesFolder.key) private var receivedFolder = ""
     @AppStorage(FramedTCPTransport.skipCertificateCheckKey) private var skipCertificateCheck = false
     @AppStorage(RelayProxy.defaultsKey) private var relayProxy = ""
+    @AppStorage(RelayProxy.userKey) private var relayProxyUser = ""
+    @AppStorage(RelayProxy.passwordKey) private var relayProxyPassword = ""
 
     var body: some View {
         TabView {
@@ -194,11 +196,14 @@ struct MacViewerSettings: View {
                 LabeledRow("Scroll speed", value: String(format: "%.2g×", scrollSensitivity))
             }
             Section(header: Text("Network")) {
-                TextField("SOCKS5 proxy (host:port)", text: $relayProxy)
+                TextField("Proxy (optional)", text: $relayProxy)
                     .disableAutocorrection(true)
+                TextField("Proxy user name", text: $relayProxyUser)
+                    .disableAutocorrection(true)
+                SecureField("Proxy password", text: $relayProxyPassword)
                 Text(RelayProxy.parse(relayProxy) == nil && !relayProxy.trimmingCharacters(in: .whitespaces).isEmpty
-                     ? "Not a valid host:port. The proxy is ignored."
-                     : "Optional. Sends the UltraViewer connection through a SOCKS5 proxy, for example 127.0.0.1:1080 after running: ssh -N -D 1080 your-server. Leave empty to connect directly. Restart the connection after changing it.")
+                     ? "Not a valid proxy address. The proxy is ignored."
+                     : "Sends the UltraViewer connection through a proxy. Examples: 127.0.0.1:1080 (SOCKS5, for ssh -D), socks5s://host (SOCKS5 over TLS), https://host (HTTP proxy over TLS, port 443), http://host:3128. Leave empty to connect directly. The password is stored in this Mac's app settings. Reconnect after changing it.")
                     .font(.caption).foregroundColor(.secondary)
             }
             Section(header: Text("Connection security")) {
