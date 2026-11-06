@@ -215,7 +215,7 @@ struct MacViewerSettings: View {
                 }
                 Text(RelayProxy.parse(relayProxy) == nil && !relayProxy.trimmingCharacters(in: .whitespaces).isEmpty
                      ? "Not a valid proxy address. The proxy is ignored."
-                     : "Sends the UltraViewer connection through a proxy. Examples: 127.0.0.1:1080 (SOCKS5, for ssh -D), socks5s://host (SOCKS5 over TLS), https://host (HTTP proxy over TLS, port 443), http://host:3128. Leave empty to connect directly. The password is stored in this Mac's app settings. Reconnect after changing it.")
+                     : "Sends the UltraViewer connection through a proxy. Examples: ssh://my-server (the app runs ssh -N -D for you; key login, ~/.ssh/config aliases work), 127.0.0.1:1080 (SOCKS5, for ssh -D), socks5s://host (SOCKS5 over TLS), https://host (HTTP proxy over TLS, port 443), http://host:3128. Leave empty to connect directly. The password is stored in this Mac's app settings. Reconnect after changing it.")
                     .font(.caption).foregroundColor(.secondary)
             }
             #if DEBUG

@@ -111,7 +111,15 @@ public actor FramedTCPTransport {
         var dialPort = endpointPort
         receivedHTTPStatusCode = nil
         do {
-            if let proxy = RelayProxy.configured {
+            if var proxy = RelayProxy.configured {
+                if proxy.kind == .ssh {
+                    let localSOCKS: UInt16
+                    do { localSOCKS = try await SSHTunnel.shared.localPort(for: proxy) } catch {
+                        ConnectLog.write("ssh tunnel failed: \(error.localizedDescription)")
+                        throw Error.proxyFailed(error.localizedDescription)
+                    }
+                    proxy = RelayProxy.Address(host: "127.0.0.1", port: localSOCKS)
+                }
                 ConnectLog.write("via proxy \(proxy.summary) -> \(host):\(port)")
                 let proxyBridge = ProxyBridge(proxy: proxy, targetHost: host, targetPort: port)
                 bridge = proxyBridge

@@ -10,13 +10,16 @@ import Foundation
 ///   `socks5s://[user:pass@]host[:443]`   SOCKS5 inside TLS
 ///   `http://[user:pass@]host:3128`       HTTP CONNECT (e.g. Squid)
 ///   `https://[user:pass@]host[:443]`     HTTP CONNECT inside TLS
+///   `ssh://[user@]host[:port]`           the app runs `ssh -N -D` to that host (an
+///                                        ~/.ssh/config alias works, key login only) and
+///                                        uses the local SOCKS5 port it opens
 public enum RelayProxy {
     public static let defaultsKey = "MacViewer.relaySOCKS5Proxy"
     public static let userKey = "MacViewer.relayProxyUser"
     public static let passwordKey = "MacViewer.relayProxyPassword"
 
     public struct Address: Equatable, Sendable {
-        public enum Kind: String, Sendable { case socks5, http }
+        public enum Kind: String, Sendable { case socks5, http, ssh }
         public var kind: Kind
         public var host: String
         public var port: UInt16
@@ -32,7 +35,11 @@ public enum RelayProxy {
 
         /// Never includes the password.
         public var summary: String {
+            if kind == .ssh {
+                return "ssh://\(username.map { "\($0)@" } ?? "")\(host)\(port == 0 ? "" : ":\(port)")"
+            }
             let scheme = switch (kind, useTLS) {
+            case (.ssh, _): "ssh"
             case (.socks5, false): "socks5"
             case (.socks5, true): "socks5s"
             case (.http, false): "http"
@@ -52,6 +59,7 @@ public enum RelayProxy {
             switch value[..<range.lowerBound].lowercased() {
             case "socks5", "socks5h": break
             case "socks5s", "socks5+tls": tls = true; defaultPort = 443
+            case "ssh": return parseSSH(value[range.upperBound...])
             case "http": kind = .http
             case "https": kind = .http; tls = true; defaultPort = 443
             default: return nil
@@ -84,6 +92,30 @@ public enum RelayProxy {
         if host.hasPrefix("["), host.hasSuffix("]") { host = String(host.dropFirst().dropLast()) }
         guard !host.isEmpty else { return nil }
         return Address(host: host, port: port, kind: kind, useTLS: tls, username: user, password: pass)
+    }
+
+    /// `[user@]host[:port]`; the host may be an ~/.ssh/config alias.
+    private static func parseSSH(_ text: Substring) -> Address? {
+        var rest = text
+        while rest.hasSuffix("/") { rest = rest.dropLast() }
+        var user: String?
+        if let at = rest.lastIndex(of: "@") {
+            user = String(rest[..<at]).removingPercentEncoding
+            rest = rest[rest.index(after: at)...]
+            if user?.isEmpty == true { user = nil }
+        }
+        var port: UInt16 = 0
+        if let colon = rest.lastIndex(of: ":"), !rest.hasSuffix("]") {
+            guard let parsed = UInt16(rest[rest.index(after: colon)...]), parsed > 0 else { return nil }
+            port = parsed
+            rest = rest[..<colon]
+        }
+        var host = String(rest)
+        if host.hasPrefix("["), host.hasSuffix("]") { host = String(host.dropFirst().dropLast()) }
+        // The host goes to ssh as an argument: refuse anything that could be read as an option.
+        guard !host.isEmpty, !host.hasPrefix("-"), !host.contains(where: { $0.isWhitespace }) else { return nil }
+        if let user, user.hasPrefix("-") || user.contains(where: { $0.isWhitespace }) { return nil }
+        return Address(host: host, port: port, kind: .ssh, username: user)
     }
 
     /// Environment first, then Settings. Separate user/password settings apply
@@ -224,6 +256,7 @@ final class ProxyBridge: @unchecked Sendable {
         switch proxy.kind {
         case .socks5: socksHandshake(proxyConnection)
         case .http: httpConnect(proxyConnection)
+        case .ssh: fail("an ssh:// proxy must be resolved to a local SOCKS5 port first")
         }
     }
 

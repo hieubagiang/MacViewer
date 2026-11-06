@@ -90,6 +90,14 @@ What works today on that network: `ssh -N -D 1080 <server>` through a Cloudflare
 3. If that fails too, the payload must be opaque to the FortiGate: add an app-level encrypted layer (for example Shadowsocks-style AEAD to the server) or a built-in "SSH tunnel" option that runs `ssh -N -D` through the Cloudflare tunnel (the one thing proven to work); until then keep using `ssh -D` manually.
 4. Best long-term fix remains asking IT to exempt `*.ultraviewer.net` TCP 443 from SSL inspection / IPS; give them the issuer `FG121GTK24002248`.
 
+## Status 2026-11-06 (latest): built-in SSH tunnel works behind the FortiGate
+
+Proxy = `ssh://hieuit-cf` (any `~/.ssh/config` alias or `ssh://[user@]host[:port]`; key/agent login only, `BatchMode`). The app runs `/usr/bin/ssh -N -T -D 127.0.0.1:<free port>` itself (`SSHTunnel.swift`), waits for the port, then uses it as a local SOCKS5 proxy. `~/.ssh/config` applies, so the cloudflared `ProxyCommand` works.
+
+Tested on the office network with a real session: tunnel up in 1.3 s, `relay opened certIssuer=Sectigo...` (not FortiGate), frame #1 (95 KB) decoded and the session stayed up 38 s+ with relay pings answered. A leftover ssh from a force-quit app is killed on the next start (pid file in the temp dir).
+
+Not done: the `socks5s://` experiment (low value now that this works). `swift test` cannot run here (no Xcode, no `Testing` module); `Tests/UltraViewerProtocolTests/SSHTunnelTests.swift` is written but unrun.
+
 ## Hypotheses (superseded by the root cause above)
 
 1. The first frame is too large for the relay path (frames of 250–450 KB). Test: `MACVIEWER_FIRST_QUALITY=10` sends `32|||2` and `31|||10` right after `17`; check whether `frame #1 payload=` shrinks and the session survives.
