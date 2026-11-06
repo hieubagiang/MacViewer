@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WebSocket stream test</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; max-width: 720px; }
+  #verdict { font-size: 20px; font-weight: 600; margin: 12px 0; }
+  .ok { color: #1a7f37; } .bad { color: #c62828; } .wait { color: #9a6700; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 6px; white-space: pre-wrap; }
+  @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } pre { background: #222; } }
+  button { font: inherit; padding: 6px 12px; }
+</style>
+</head>
+<body>
+<h3>WebSocket stream test</h3>
+<p>Streams about 450 KB at once, then a steady flow with bursts, for 60 seconds. Leave this tab open.</p>
+<div id="verdict" class="wait">Connecting…</div>
+<pre id="out"></pre>
+<button id="copy">Copy result</button> <button id="again">Run again</button>
+<script>
+(function () {
+  const TEST_SECONDS = 60;
+  const out = document.getElementById('out'), verdict = document.getElementById('verdict');
+  let ws, started, bytes, messages, biggest, rtts, firstBurstAt, finished, closeInfo, timer;
+
+  function summary() {
+    const secs = ((performance.now() - started) / 1000).toFixed(1);
+    const sorted = rtts.slice().sort((a, b) => a - b);
+    const med = sorted.length ? sorted[Math.floor(sorted.length / 2)].toFixed(0) : '-';
+    const p95 = sorted.length ? sorted[Math.floor(sorted.length * 0.95)].toFixed(0) : '-';
+    return [
+      'time connected : ' + secs + ' s',
+      'received       : ' + (bytes / 1024).toFixed(0) + ' KB in ' + messages + ' messages',
+      'biggest message: ' + biggest + ' bytes',
+      'first burst    : ' + (firstBurstAt == null ? 'not received' : 'after ' + firstBurstAt.toFixed(0) + ' ms'),
+      'ping round trip: median ' + med + ' ms, p95 ' + p95 + ' ms (' + rtts.length + ' pongs)',
+      'close          : ' + (closeInfo || 'still open'),
+      'page           : ' + location.href,
+      'when           : ' + new Date().toISOString(),
+    ].join('\n');
+  }
+
+  function render() { out.textContent = summary(); }
+
+  function finish(ok, text) {
+    if (finished) return;
+    finished = true;
+    clearInterval(timer);
+    verdict.className = ok ? 'ok' : 'bad';
+    verdict.textContent = text;
+    render();
+  }
+
+  function run() {
+    finished = false; bytes = 0; messages = 0; biggest = 0; rtts = []; firstBurstAt = null; closeInfo = null;
+    verdict.className = 'wait'; verdict.textContent = 'Connecting…';
+    const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host +
+      location.pathname.replace(/[^/]*$/, '') + 'ws';
+    started = performance.now();
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => { verdict.textContent = 'Connected, streaming…'; };
+    ws.onmessage = (e) => {
+      if (typeof e.data === 'string') {
+        if (e.data.startsWith('pong:')) rtts.push(performance.now() - parseFloat(e.data.slice(5)));
+        return;
+      }
+      messages++; bytes += e.data.byteLength; biggest = Math.max(biggest, e.data.byteLength);
+      if (firstBurstAt == null && e.data.byteLength >= 400000) firstBurstAt = performance.now() - started;
+    };
+    ws.onerror = () => { closeInfo = closeInfo || 'error event'; };
+    ws.onclose = (e) => {
+      closeInfo = 'code ' + e.code + (e.reason ? ' (' + e.reason + ')' : '') + ', clean=' + e.wasClean;
+      const secs = (performance.now() - started) / 1000;
+      if (secs < TEST_SECONDS) finish(false, 'CUT after ' + secs.toFixed(1) + ' s');
+    };
+    timer = setInterval(() => {
+      if (ws.readyState === 1) ws.send('ping:' + performance.now());
+      render();
+      const secs = (performance.now() - started) / 1000;
+      if (!finished && secs >= TEST_SECONDS && ws.readyState === 1) {
+        finish(true, 'ALIVE for ' + TEST_SECONDS + ' s, not cut');
+        ws.close();
+      }
+    }, 1000);
+  }
+
+  document.getElementById('copy').onclick = () => navigator.clipboard.writeText(verdict.textContent + '\n' + summary());
+  document.getElementById('again').onclick = () => { try { ws.close(); } catch (e) {} clearInterval(timer); run(); };
+  run();
+})();
+</script>
+</body>
+</html>

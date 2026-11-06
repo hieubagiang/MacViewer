@@ -104,6 +104,14 @@ Proxy = `socks5s://macviewer:<password>@px.<domain>` (user/password can also go 
 
 Server side (no secrets here): a separate `xray-s5.service` (own config in `/etc/xray-s5/`, user `nobody`) with one `socks` inbound on `127.0.0.1:1081`, password auth. The existing xray/VPN is untouched. In `/etc/nginx/nginx.conf` the stream server on `127.0.0.1:8446` (SNI `px.<domain>`) now proxies to `127.0.0.1:1081` instead of Squid `3128` (backup: `nginx.conf.bak-s5-*`), so `https://` HTTP-CONNECT proxy no longer works on that host. Squid is still running on 3128 but unreachable from outside; remove it if not needed. The password is in `/etc/xray-s5/config.json` on the server only.
 
+## Web app idea: WebSocket stream test (2026-11-06)
+
+If the UltraViewer protocol never crosses the office network (a server speaks it and streams the screen to a browser over HTTPS/WebSocket), the FortiGate has nothing it recognizes. `scripts/wstest/` (see its README) checks that cheaply: a WebSocket that sends a 450 KB burst plus a steady stream for 60 s.
+
+- Dev Mac, host behind Cloudflare's proxy, TLS re-signed by the FortiGate: ALIVE, 1.1 MB in 20 s, ping median 87 ms.
+- Office Mac (the one that gets cut): run `https://<host>/wstest/` in a browser and record ALIVE/CUT here. Not run yet.
+- Server measured: 2 vCPU Xeon 2.6 GHz, 3.9 GB RAM, ~220 Mbps up / ~280 Mbps down, 20 ms to the UltraViewer ID server. Estimated (not measured): server-side decode plus re-encode costs about 50-70% of a core per heavy session, under 5% per light session, so CPU is the limit (2-3 heavy or 20-30 light sessions). A WebSocket-to-TCP gateway with the client in WASM would need almost no server CPU.
+
 ## Hypotheses (superseded by the root cause above)
 
 1. The first frame is too large for the relay path (frames of 250–450 KB). Test: `MACVIEWER_FIRST_QUALITY=10` sends `32|||2` and `31|||10` right after `17`; check whether `frame #1 payload=` shrinks and the session survives.
