@@ -30,7 +30,6 @@ struct MacViewerApp: App {
                     updater.startAutomaticChecks()
                     agents.start()
                     #if DEBUG
-                    DebugLogWindowController.shared.showOnceAtLaunch()
                     ConnectLog.write("debug log started pid=\(ProcessInfo.processInfo.processIdentifier) version=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
                     // Debug only: MACVIEWER_AUTOCONNECT=<id>:<password> connects once at launch.
                     if let spec = ProcessInfo.processInfo.environment["MACVIEWER_AUTOCONNECT"],
@@ -219,6 +218,13 @@ struct MacViewerSettings: View {
                      : "Sends the UltraViewer connection through a proxy. Examples: 127.0.0.1:1080 (SOCKS5, for ssh -D), socks5s://host (SOCKS5 over TLS), https://host (HTTP proxy over TLS, port 443), http://host:3128. Leave empty to connect directly. The password is stored in this Mac's app settings. Reconnect after changing it.")
                     .font(.caption).foregroundColor(.secondary)
             }
+            #if DEBUG
+            Section(header: Text("Diagnostics")) {
+                Button("Open connection log") { DebugLogWindowController.shared.show() }
+                Text("Shows what the app does while connecting. The log is also saved to ~/Library/Logs/MacViewer/connect.log. Shortcut: Option-Command-L.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            #endif
             Section(header: Text("Connection security")) {
                 Toggle("Skip the relay certificate check", isOn: $skipCertificateCheck)
                 Text("Only turn this on if connecting fails with a certificate error. While it is on, someone on your network could pose as the UltraViewer relay and see or change the session.")

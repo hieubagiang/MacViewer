@@ -8,7 +8,6 @@ import UltraViewerProtocol
 final class DebugLogWindowController {
     static let shared = DebugLogWindowController()
     private var window: NSWindow?
-    private var shownAtLaunch = false
 
     private func makeWindow() -> NSWindow {
         if let window { return window }
@@ -25,13 +24,6 @@ final class DebugLogWindowController {
     }
 
     func show() { let w = makeWindow(); w.makeKeyAndOrderFront(nil) }
-
-    /// Opens behind the main window once per launch so it is never missed.
-    func showOnceAtLaunch() {
-        guard !shownAtLaunch else { return }
-        shownAtLaunch = true
-        makeWindow().orderFront(nil)
-    }
 }
 
 private struct DebugLogView: View {
