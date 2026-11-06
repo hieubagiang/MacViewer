@@ -150,11 +150,28 @@ impl Stored {
     }
 }
 
+/// Home directory: `$HOME`, or `%USERPROFILE%` on Windows, which has no HOME.
+pub fn home_dir() -> Option<PathBuf> {
+    ["HOME", "USERPROFILE"].iter()
+        .find_map(|name| std::env::var_os(name).filter(|v| !v.is_empty()))
+        .map(PathBuf::from)
+}
+
+/// Per-user config folder: `$XDG_CONFIG_HOME`, else `%APPDATA%` on Windows, else `~/.config`.
+pub fn config_base() -> Option<PathBuf> {
+    if let Some(x) = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(x));
+    }
+    if cfg!(windows) {
+        if let Some(appdata) = std::env::var_os("APPDATA").filter(|v| !v.is_empty()) {
+            return Some(PathBuf::from(appdata));
+        }
+    }
+    home_dir().map(|h| h.join(".config"))
+}
+
 fn config_dir() -> Result<PathBuf> {
-    let base = match std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
-        Some(x) => PathBuf::from(x),
-        None => PathBuf::from(std::env::var_os("HOME").ok_or("HOME is not set")?).join(".config"),
-    };
+    let base = config_base().ok_or("the home folder is unknown (HOME / USERPROFILE is not set)")?;
     Ok(base.join("linuxviewer"))
 }
 

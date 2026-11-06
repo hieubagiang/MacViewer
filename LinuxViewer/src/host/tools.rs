@@ -28,7 +28,7 @@ pub fn default_download_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("XDG_DOWNLOAD_DIR").filter(|d| !d.is_empty()) {
         return dir.into();
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| ".".into());
+    let home = crate::profile::home_dir().unwrap_or_else(|| ".".into());
     // xdg-user-dirs writes XDG_DOWNLOAD_DIR="$HOME/Downloads" into this file.
     if let Ok(text) = std::fs::read_to_string(home.join(".config/user-dirs.dirs")) {
         for line in text.lines() {

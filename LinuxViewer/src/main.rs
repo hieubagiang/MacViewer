@@ -93,7 +93,7 @@ fn run(args: &[String]) -> Result<()> {
 }
 
 fn default_download_dir() -> std::path::PathBuf {
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_else(|| ".".into());
+    let home = linuxviewer::profile::home_dir().unwrap_or_else(|| ".".into());
     let downloads = home.join("Downloads");
     if downloads.is_dir() { downloads } else { home }
 }

@@ -909,7 +909,7 @@ pub fn run_gui() -> Result<()> {
 
 fn new_viewer(profile: Profile, partner_id: &str, password: &str, base: ConnectOptions,
               proxy: EventLoopProxy<UiEvent>, generation: u64) -> App {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::profile::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let downloads = home.join("Downloads");
     App {
         session: None, pending: Some((profile, password.to_string())), proxy: Some(proxy), generation, done: false,
