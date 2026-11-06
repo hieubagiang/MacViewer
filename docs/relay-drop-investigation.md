@@ -52,7 +52,7 @@ When IT cannot exempt `*.ultraviewer.net`, send the connection through a server 
 
 How it works: `SOCKS5Bridge` listens once on 127.0.0.1, does the SOCKS5 no-auth CONNECT to the real relay, and copies bytes. The app's TLS handshake still runs end to end with the relay, so certificates are verified as before and the proxy only carries encrypted bytes. Works on every supported macOS (no `ProxyConfiguration`, which needs macOS 14). LAN direct does not use the proxy.
 
-Verified here (no firewall on this network, so this proves the bridge, not the firewall bypass): unit tests (`SOCKS5BridgeTests`, 200 KB round trip, refused CONNECT, unreachable proxy) and a live session through a local SOCKS5 proxy, relay opened, frames decoded, session alive 13 s+. Not yet verified: on the office network behind the FortiGate.
+Verified here (no firewall on this network, so this proves the bridge, not the firewall bypass): unit tests (`SOCKS5BridgeTests`, 200 KB round trip, refused CONNECT, unreachable proxy) and a live session through a local SOCKS5 proxy, relay opened, frames decoded, session alive 13 s+. Verified on the office network behind the FortiGate (2026-11-06, same Mac, same host): without the proxy the relay certificate issuer is `FG121GTK24002248` and the session is cut after the first frame (`relayCutByFirewall`); through `ssh -D` the issuer is Sectigo and the session stayed up 15 s (23 frames, 94 commands, relay ping answered) until the user closed it.
 
 This is a way around a corporate control. Prefer asking IT for the exemption when possible.
 
