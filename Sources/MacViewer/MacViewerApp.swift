@@ -98,6 +98,7 @@ struct MacViewerSettings: View {
     @AppStorage(RelayProxy.defaultsKey) private var relayProxy = ""
     @AppStorage(RelayProxy.userKey) private var relayProxyUser = ""
     @AppStorage(RelayProxy.passwordKey) private var relayProxyPassword = ""
+    @State private var showProxyPassword = false
 
     var body: some View {
         TabView {
@@ -200,7 +201,19 @@ struct MacViewerSettings: View {
                     .disableAutocorrection(true)
                 TextField("Proxy user name", text: $relayProxyUser)
                     .disableAutocorrection(true)
-                SecureField("Proxy password", text: $relayProxyPassword)
+                HStack {
+                    if showProxyPassword {
+                        TextField("Proxy password", text: $relayProxyPassword)
+                            .disableAutocorrection(true)
+                    } else {
+                        SecureField("Proxy password", text: $relayProxyPassword)
+                    }
+                    Button { showProxyPassword.toggle() } label: {
+                        Image(systemName: showProxyPassword ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(showProxyPassword ? "Hide password" : "Show password")
+                }
                 Text(RelayProxy.parse(relayProxy) == nil && !relayProxy.trimmingCharacters(in: .whitespaces).isEmpty
                      ? "Not a valid proxy address. The proxy is ignored."
                      : "Sends the UltraViewer connection through a proxy. Examples: 127.0.0.1:1080 (SOCKS5, for ssh -D), socks5s://host (SOCKS5 over TLS), https://host (HTTP proxy over TLS, port 443), http://host:3128. Leave empty to connect directly. The password is stored in this Mac's app settings. Reconnect after changing it.")

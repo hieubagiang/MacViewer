@@ -58,6 +58,18 @@ Verified here (no firewall on this network, so this proves the bridge, not the f
 
 This is a way around a corporate control. Prefer asking IT for the exemption when possible.
 
+### Server side used for the HTTPS proxy (2026-11-06)
+
+Many corporate networks only allow outbound 443 to unknown hosts, so a plain proxy port (3128, 1080) is unreachable. Setup that works from the office network:
+
+- DNS-only A record `px.<domain>` (not proxied: Cloudflare's proxy does not carry CONNECT) pointing to the server.
+- Let's Encrypt certificate for that name (`certbot --webroot`), plus an HTTP :80 vhost that serves `/.well-known/acme-challenge/` so renewal keeps working.
+- nginx `stream` on 443 already routes by SNI (`ssl_preread`). Add `px.<domain> 127.0.0.1:8446;` to the map and a stream `server { listen 127.0.0.1:8446 ssl; ...cert...; proxy_timeout 1h; proxy_pass 127.0.0.1:3128; }`. Other SNIs are unchanged.
+- Squid with Basic auth (`basic_ncsa_auth`, `htpasswd`-style file) bound to `127.0.0.1:3128` only.
+- App setting: `https://user:password@px.<domain>` (or the separate user/password fields).
+
+Verified: `curl --proxy https://px.<domain>:443 --proxy-user user:pass https://api.ipify.org` returns the server's IP, a wrong password gets 407, and the app's ID-server lookup went through it. A full relay session through this HTTPS proxy was not re-run because the test host rotated its password.
+
 ## Hypotheses (superseded by the root cause above)
 
 1. The first frame is too large for the relay path (frames of 250–450 KB). Test: `MACVIEWER_FIRST_QUALITY=10` sends `32|||2` and `31|||10` right after `17`; check whether `frame #1 payload=` shrinks and the session survives.
