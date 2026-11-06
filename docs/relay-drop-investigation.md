@@ -81,11 +81,13 @@ Behind the FortiGate, with Proxy = `https://user:pass@px.<domain>` (HTTP CONNECT
 
 What works today on that network: `ssh -N -D 1080 <server>` through a Cloudflare tunnel, with Proxy = `127.0.0.1:1080` (15 s+ session, 23 frames, relay ping answered).
 
+**Confirmed (2026-11-06, office Mac):** `openssl s_client -connect px.<domain>:443 -servername px.<domain>` shows issuer `Fortinet ... CN=FG121GTK24002248`. The FortiGate decrypts every TLS session to an unknown host on 443, including our proxy host. So any proxy protocol whose bytes are readable inside the outer TLS (HTTP CONNECT, and probably SOCKS5) is visible to it. Only a payload it cannot read gets through (SSH worked).
+
 ### Next steps (for the next session)
 
-1. Run the confirm command above and record the issuer here.
+1. ~~Run the confirm command above and record the issuer here.~~ Done, see above.
 2. If the outer layer is intercepted, try a payload that is not an HTTP CONNECT: SOCKS5 inside TLS (`socks5s://`). Server side needs a SOCKS5 server (for example a separate xray instance with a `socks` inbound and auth, or dante) behind the same nginx `stream` TLS terminator on a second SNI. Client side already supports `socks5s://` and user/password; the TLS leg has only been exercised against the HTTP variant. Risk: the FortiGate may recognize SOCKS and block it.
-3. If that fails too, tunnel something the FortiGate cannot parse (WebSocket-wrapped stream, or SSH over a Cloudflare tunnel as above) and add a built-in "SSH tunnel" option to the app, or keep using `ssh -D`.
+3. If that fails too, the payload must be opaque to the FortiGate: add an app-level encrypted layer (for example Shadowsocks-style AEAD to the server) or a built-in "SSH tunnel" option that runs `ssh -N -D` through the Cloudflare tunnel (the one thing proven to work); until then keep using `ssh -D` manually.
 4. Best long-term fix remains asking IT to exempt `*.ultraviewer.net` TCP 443 from SSL inspection / IPS; give them the issuer `FG121GTK24002248`.
 
 ## Hypotheses (superseded by the root cause above)
